@@ -5,8 +5,8 @@ import { readFrontMatter } from "./frontmatter";
 import { getProvider } from "./providers";
 import { registerAllCommands } from "./commands";
 import { QuickMenuModal } from "./modals";
-import { DEFAULT_SETTINGS, SybylSettingTab, normalizeSettings } from "./settings";
-import { GenerationRequest, GenerationResponse, NoteFrontMatter, ResolvedSource, SybylSettings } from "./types";
+import { DEFAULT_SETTINGS, ChorusSettingTab, normalizeSettings } from "./settings";
+import { ChorusSettings, GenerationRequest, GenerationResponse, NoteFrontMatter, ResolvedSource } from "./types";
 
 export interface ActiveNoteContext {
   view: MarkdownView;
@@ -14,14 +14,14 @@ export interface ActiveNoteContext {
   noteBody: string;
 }
 
-export default class SybylPlugin extends Plugin {
-  settings: SybylSettings = DEFAULT_SETTINGS;
+export default class ChorusPlugin extends Plugin {
+  settings: ChorusSettings = DEFAULT_SETTINGS;
 
   async onload(): Promise<void> {
     await this.loadSettings();
-    this.addSettingTab(new SybylSettingTab(this.app, this));
+    this.addSettingTab(new ChorusSettingTab(this.app, this));
     registerAllCommands(this);
-    this.addRibbonIcon("dice", "Sybyl", () => {
+    this.addRibbonIcon("dice", "Chorus", () => {
       new QuickMenuModal(this.app, this).open();
     });
   }
@@ -55,7 +55,7 @@ export default class SybylPlugin extends Plugin {
   ): Promise<GenerationResponse> {
     const provider = getProvider(this.settings);
     const request = buildRequest(fm, userMessage, this.settings, maxOutputTokens, noteBody);
-    const progress = new Notice("Sybyl: Generating...", 0);
+    const progress = new Notice("Chorus: Generating...", 0);
     try {
       return await provider.generate(request);
     } finally {
@@ -70,14 +70,16 @@ export default class SybylPlugin extends Plugin {
     resolvedSources: ResolvedSource[] = []
   ): Promise<GenerationResponse> {
     const provider = getProvider(this.settings);
+    const lonelogActive = fm.lonelog ?? this.settings.lonelogMode;
+    const partylogActive = fm.partylog ?? this.settings.partylogMode;
     const request: GenerationRequest = {
-      systemPrompt: buildSystemPrompt(fm, false),
+      systemPrompt: buildSystemPrompt(fm, lonelogActive, partylogActive),
       userMessage,
       resolvedSources,
       temperature: fm.temperature ?? this.settings.defaultTemperature,
       maxOutputTokens
     };
-    const progress = new Notice("Sybyl: Generating...", 0);
+    const progress = new Notice("Chorus: Generating...", 0);
     try {
       return await provider.generate(request);
     } finally {

@@ -1,10 +1,10 @@
 import { App, Notice, PluginSettingTab, Setting } from "obsidian";
-import type SybylPlugin from "./main";
+import type ChorusPlugin from "./main";
 import { getProvider } from "./providers";
 import { OllamaProvider } from "./providers/ollama";
-import { ProviderID, SybylSettings, ValidationState } from "./types";
+import { ChorusSettings, ProviderID, ValidationState } from "./types";
 
-export const DEFAULT_SETTINGS: SybylSettings = {
+export const DEFAULT_SETTINGS: ChorusSettings = {
   activeProvider: "gemini",
   providers: {
     gemini: { apiKey: "", defaultModel: "gemma-4-26b-a4b-it" },
@@ -19,10 +19,15 @@ export const DEFAULT_SETTINGS: SybylSettings = {
   lonelogMode: false,
   lonelogContextDepth: 60,
   lonelogWrapCodeBlock: true,
-  lonelogAutoIncScene: true
+  lonelogAutoIncScene: true,
+  partylogMode: false,
+  partylogContextDepth: 60,
+  partylogWrapCodeBlock: true,
+  partylogAutoIncScene: true,
+  partylogInsertRaw: true
 };
 
-export function normalizeSettings(raw: Partial<SybylSettings> | null | undefined): SybylSettings {
+export function normalizeSettings(raw: Partial<ChorusSettings> | null | undefined): ChorusSettings {
   return {
     ...DEFAULT_SETTINGS,
     ...(raw ?? {}),
@@ -36,19 +41,19 @@ export function normalizeSettings(raw: Partial<SybylSettings> | null | undefined
   };
 }
 
-export class SybylSettingTab extends PluginSettingTab {
+export class ChorusSettingTab extends PluginSettingTab {
   private validation: Partial<Record<ProviderID, ValidationState>> = {};
   private modelCache: Partial<Record<ProviderID, string[]>> = {};
   private fetchingProviders = new Set<ProviderID>();
 
-  constructor(app: App, private readonly plugin: SybylPlugin) {
+  constructor(app: App, private readonly plugin: ChorusPlugin) {
     super(app, plugin);
   }
 
   display(): void {
     const { containerEl } = this;
     containerEl.empty();
-    containerEl.createEl("h2", { text: `Sybyl Settings (${this.providerLabel(this.plugin.settings.activeProvider)})` });
+    containerEl.createEl("h2", { text: `Chorus Settings (${this.providerLabel(this.plugin.settings.activeProvider)})` });
     this.maybeFetchModels();
     this.renderActiveProvider(containerEl);
     this.renderProviderConfig(containerEl);
@@ -331,6 +336,8 @@ export class SybylSettingTab extends PluginSettingTab {
           await this.plugin.saveSettings();
         });
       });
+
+    // Lonelog section
     new Setting(containerEl)
       .setName("Lonelog Mode")
       .setDesc("Enable Lonelog notation, context parsing, and Lonelog-specific commands.")
@@ -370,6 +377,57 @@ export class SybylSettingTab extends PluginSettingTab {
           toggle.setValue(this.plugin.settings.lonelogWrapCodeBlock);
           toggle.onChange(async (value) => {
             this.plugin.settings.lonelogWrapCodeBlock = value;
+            await this.plugin.saveSettings();
+          });
+        });
+    }
+
+    // Partylog section
+    if (this.plugin.settings.lonelogMode && this.plugin.settings.partylogMode) {
+      containerEl.createEl("p", {
+        text: "⚠ Both Lonelog and Partylog global toggles are on. Per-note frontmatter (lonelog: true / partylog: true) takes precedence. If neither is set, Partylog wins globally.",
+        cls: "mod-warning"
+      });
+    }
+    new Setting(containerEl)
+      .setName("Partylog Mode")
+      .setDesc("Enable Partylog notation, context parsing, and group play commands.")
+      .addToggle((toggle) => {
+        toggle.setValue(this.plugin.settings.partylogMode);
+        toggle.onChange(async (value) => {
+          this.plugin.settings.partylogMode = value;
+          await this.plugin.saveSettings();
+          this.display();
+        });
+      });
+    if (this.plugin.settings.partylogMode) {
+      new Setting(containerEl)
+        .setName("Auto-increment scene counter")
+        .addToggle((toggle) => {
+          toggle.setValue(this.plugin.settings.partylogAutoIncScene);
+          toggle.onChange(async (value) => {
+            this.plugin.settings.partylogAutoIncScene = value;
+            await this.plugin.saveSettings();
+          });
+        });
+      new Setting(containerEl)
+        .setName("Context extraction depth")
+        .addText((text) => {
+          text.setValue(String(this.plugin.settings.partylogContextDepth));
+          text.onChange(async (value) => {
+            const next = Number(value);
+            if (!Number.isNaN(next) && next > 0) {
+              this.plugin.settings.partylogContextDepth = next;
+              await this.plugin.saveSettings();
+            }
+          });
+        });
+      new Setting(containerEl)
+        .setName("Wrap notation in code blocks")
+        .addToggle((toggle) => {
+          toggle.setValue(this.plugin.settings.partylogWrapCodeBlock);
+          toggle.onChange(async (value) => {
+            this.plugin.settings.partylogWrapCodeBlock = value;
             await this.plugin.saveSettings();
           });
         });

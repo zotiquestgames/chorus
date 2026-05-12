@@ -1,5 +1,5 @@
 import { Notice, TFile, normalizePath } from "obsidian";
-import type SybylPlugin from "./main";
+import type ChorusPlugin from "./main";
 import { getSelection, insertBelowSelection, isInsideCodeBlock } from "./editor";
 import { removeSourceRef, upsertSourceRef, writeFrontMatterKey } from "./frontmatter";
 import {
@@ -14,16 +14,35 @@ import {
   LonelogFormatOptions
 } from "./lonelog/formatter";
 import { parseLonelogContext, serializeContext } from "./lonelog/parser";
+import {
+  formatCollaborativeAction,
+  formatDeclareAction as formatPartylogDeclareAction,
+  formatExpandScene as formatPartylogExpandScene,
+  formatGMEvent,
+  formatLogThis,
+  formatStartScene as formatPartylogStartScene,
+  formatWhatNow,
+  PartylogFormatOptions
+} from "./partylog/formatter";
+import { parsePartylogContext, serializePartylogContext } from "./partylog/parser";
 import { ManageSourcesModal, openInputModal, pickLocalFile, pickSourceOrigin, pickSourceRef, pickVaultFile } from "./modals";
 import { resolveSourcesForRequest } from "./sourceUtils";
-import { NoteFrontMatter, SourceRef, SybylSettings } from "./types";
+import { ChorusSettings, NoteFrontMatter, SourceRef } from "./types";
 
-function isLonelogActive(settings: SybylSettings, fm: NoteFrontMatter): boolean {
+function isLonelogActive(settings: ChorusSettings, fm: NoteFrontMatter): boolean {
   return fm.lonelog ?? settings.lonelogMode;
 }
 
-function lonelogOpts(settings: SybylSettings, noWrap = false): LonelogFormatOptions {
+function isPartylogActive(settings: ChorusSettings, fm: NoteFrontMatter): boolean {
+  return fm.partylog ?? settings.partylogMode;
+}
+
+function lonelogOpts(settings: ChorusSettings, noWrap = false): LonelogFormatOptions {
   return { wrapInCodeBlock: !noWrap && (settings.lonelogWrapCodeBlock ?? true) };
+}
+
+function partylogOpts(settings: ChorusSettings, noWrap = false): PartylogFormatOptions {
+  return { wrapInCodeBlock: !noWrap && (settings.partylogWrapCodeBlock ?? true) };
 }
 
 function genericBlockquote(label: string, text: string): string {
@@ -50,7 +69,7 @@ function parseLonelogOracleResponse(text: string): { result: string; interpretat
   return { result, interpretation };
 }
 
-async function addSourceToNote(plugin: SybylPlugin, file: TFile): Promise<void> {
+async function addSourceToNote(plugin: ChorusPlugin, file: TFile): Promise<void> {
   const origin = await pickSourceOrigin(plugin.app);
   if (!origin) return;
 
@@ -67,7 +86,6 @@ async function addSourceToNote(plugin: SybylPlugin, file: TFile): Promise<void> 
     return;
   }
 
-  // External file — import into vault
   const localFile = await pickLocalFile();
   if (!localFile) return;
 
@@ -96,7 +114,7 @@ async function addSourceToNote(plugin: SybylPlugin, file: TFile): Promise<void> 
   new Notice(`Source imported: ${targetPath}`);
 }
 
-async function manageSources(plugin: SybylPlugin): Promise<void> {
+async function manageSources(plugin: ChorusPlugin): Promise<void> {
   const context = await plugin.getActiveNoteContext();
   if (!context?.view.file) {
     return;
@@ -109,7 +127,7 @@ async function manageSources(plugin: SybylPlugin): Promise<void> {
 }
 
 async function runGeneration(
-  plugin: SybylPlugin,
+  plugin: ChorusPlugin,
   userMessage: string,
   formatter: (text: string, fm: NoteFrontMatter, insideCodeBlock: boolean) => string,
   maxOutputTokens = 512,
@@ -140,12 +158,15 @@ async function runGeneration(
     }
     plugin.maybeInsertTokenComment(context.view, response);
   } catch (error) {
-    new Notice(`Sybyl error: ${error instanceof Error ? error.message : String(error)}`);
+    new Notice(`Chorus error: ${error instanceof Error ? error.message : String(error)}`);
     console.error(error);
   }
 }
 
-export function registerAllCommands(plugin: SybylPlugin): void {
+export function registerAllCommands(plugin: ChorusPlugin): void {
+
+  // ── Frontmatter ──────────────────────────────────────────────────────────
+
   plugin.addCommand({
     id: "sybyl:insert-frontmatter",
     name: "Insert Note Frontmatter",
@@ -154,10 +175,10 @@ export function registerAllCommands(plugin: SybylPlugin): void {
       if (!context?.view.file) {
         return;
       }
-      const values = await openInputModal(plugin.app, "Insert Sybyl Frontmatter", [
+      const values = await openInputModal(plugin.app, "Insert Chorus Frontmatter", [
         { key: "ruleset", label: "Game / ruleset", placeholder: "Ironsworn" },
         { key: "genre", label: "Genre", optional: true, placeholder: "Dark fantasy / survival" },
-        { key: "pcs", label: "PC", optional: true, placeholder: "Kira Voss, dangerous rank, vow: recover the relic" },
+        { key: "pcs", label: "PC (solo mode)", optional: true, placeholder: "Kira Voss, dangerous rank, vow: recover the relic" },
         { key: "tone", label: "Tone", optional: true, placeholder: "Gritty, hopeful" },
         { key: "language", label: "Language", optional: true, placeholder: "Leave blank for auto-detect" }
       ]);
@@ -173,6 +194,7 @@ export function registerAllCommands(plugin: SybylPlugin): void {
         fm["provider"] = fm["provider"] ?? plugin.settings.activeProvider;
         fm["oracle_mode"] = fm["oracle_mode"] ?? "yes-no";
         fm["lonelog"] = fm["lonelog"] ?? plugin.settings.lonelogMode;
+        fm["partylog"] = fm["partylog"] ?? plugin.settings.partylogMode;
         fm["scene_counter"] = fm["scene_counter"] ?? 1;
         fm["session_number"] = fm["session_number"] ?? 1;
         fm["game_context"] = fm["game_context"] ?? "";
@@ -182,9 +204,11 @@ export function registerAllCommands(plugin: SybylPlugin): void {
         if (values.tone) fm["tone"] = values.tone;
         if (values.language) fm["language"] = values.language;
       });
-      new Notice("Sybyl frontmatter inserted.");
+      new Notice("Chorus frontmatter inserted.");
     }
   });
+
+  // ── Sources ───────────────────────────────────────────────────────────────
 
   plugin.addCommand({
     id: "sybyl:digest-source",
@@ -233,7 +257,7 @@ Be concise and specific. Preserve game-mechanical details. Omit flavor prose and
         });
         new Notice("Game context updated.");
       } catch (error) {
-        new Notice(`Sybyl error: ${error instanceof Error ? error.message : String(error)}`);
+        new Notice(`Chorus error: ${error instanceof Error ? error.message : String(error)}`);
       }
     }
   });
@@ -282,10 +306,12 @@ Question: ${values.question}`;
         plugin.insertText(context.view, genericBlockquote("Rules", response.text));
         plugin.maybeInsertTokenComment(context.view, response);
       } catch (error) {
-        new Notice(`Sybyl error: ${error instanceof Error ? error.message : String(error)}`);
+        new Notice(`Chorus error: ${error instanceof Error ? error.message : String(error)}`);
       }
     }
   });
+
+  // ── Scene / action commands ───────────────────────────────────────────────
 
   plugin.addCommand({
     id: "sybyl:adventure-seed",
@@ -319,7 +345,7 @@ Keep it concise — 4 bullet points, one short sentence each.`;
         plugin.insertText(context.view, output);
         plugin.maybeInsertTokenComment(context.view, response);
       } catch (error) {
-        new Notice(`Sybyl error: ${error instanceof Error ? error.message : String(error)}`);
+        new Notice(`Chorus error: ${error instanceof Error ? error.message : String(error)}`);
       }
     }
   });
@@ -379,7 +405,7 @@ ${formatInstruction}`;
         plugin.insertText(context.view, output);
         plugin.maybeInsertTokenComment(context.view, response);
       } catch (error) {
-        new Notice(`Sybyl error: ${error instanceof Error ? error.message : String(error)}`);
+        new Notice(`Chorus error: ${error instanceof Error ? error.message : String(error)}`);
       }
     }
   });
@@ -514,10 +540,15 @@ ${formatInstruction}`;
       await runGeneration(
         plugin,
         "Based on the current scene context, suggest 1-2 possible consequences or complications. Present them as neutral options, not as narrative outcomes. Do not choose between them.",
-        (text, fm, insideCodeBlock) =>
-          isLonelogActive(plugin.settings, fm)
-            ? formatSuggestConsequence(text, lonelogOpts(plugin.settings, insideCodeBlock))
-            : genericBlockquote("Options", text)
+        (text, fm, insideCodeBlock) => {
+          if (isPartylogActive(plugin.settings, fm)) {
+            return formatWhatNow(text, partylogOpts(plugin.settings, insideCodeBlock));
+          }
+          if (isLonelogActive(plugin.settings, fm)) {
+            return formatSuggestConsequence(text, lonelogOpts(plugin.settings, insideCodeBlock));
+          }
+          return genericBlockquote("Options", text);
+        }
       );
     }
   });
@@ -526,6 +557,29 @@ ${formatInstruction}`;
     id: "sybyl:what-can-i-do",
     name: "What Can I Do",
     callback: async () => {
+      const context = await plugin.getActiveNoteContext();
+      if (!context) return;
+
+      if (isPartylogActive(plugin.settings, context.fm)) {
+        const values = await openInputModal(plugin.app, "What Can I Do", [
+          { key: "character", label: "Character name", optional: true, placeholder: "Leave blank for party-level options" }
+        ]);
+        if (!values) return;
+        const character = values.character?.trim();
+        const userMessage = character
+          ? `Character: ${character}\nList 2-4 available actions or moves for this character given the current scene.\nPresent as neutral options. Do not choose between them.`
+          : "The party is stuck. Based on the current scene context, suggest exactly 3-4 concrete actions the party could take next. Present them as neutral options. Do not choose between them.";
+        const insideCodeBlock = isInsideCodeBlock(context.view.editor);
+        try {
+          const response = await plugin.requestGeneration(context.fm, context.noteBody, userMessage, 512);
+          plugin.insertText(context.view, genericBlockquote("Actions", response.text));
+          plugin.maybeInsertTokenComment(context.view, response);
+        } catch (error) {
+          new Notice(`Chorus error: ${error instanceof Error ? error.message : String(error)}`);
+        }
+        return;
+      }
+
       await runGeneration(
         plugin,
         "The player is stuck. Based on the current scene context, suggest exactly 3 concrete actions the PC could take next. Present them as neutral options numbered 1–3. Do not resolve or narrate any outcome. Do not recommend one over another.",
@@ -544,14 +598,21 @@ ${formatInstruction}`;
       await runGeneration(
         plugin,
         "Expand the current scene into a prose passage. Third person, past tense, 100-150 words. No dialogue. Do not describe the PC's internal thoughts or decisions. Stay strictly within the established scene context.",
-        (text, fm, insideCodeBlock) =>
-          isLonelogActive(plugin.settings, fm)
-            ? formatExpandScene(text, lonelogOpts(plugin.settings, insideCodeBlock))
-            : `---\n> [Prose] ${text.trim().replace(/\n/g, "\n> ")}\n---`,
+        (text, fm, insideCodeBlock) => {
+          if (isPartylogActive(plugin.settings, fm)) {
+            return formatPartylogExpandScene(text, partylogOpts(plugin.settings, insideCodeBlock));
+          }
+          if (isLonelogActive(plugin.settings, fm)) {
+            return formatExpandScene(text, lonelogOpts(plugin.settings, insideCodeBlock));
+          }
+          return `---\n> [Prose] ${text.trim().replace(/\n/g, "\n> ")}\n---`;
+        },
         600
       );
     }
   });
+
+  // ── Source management ─────────────────────────────────────────────────────
 
   plugin.addCommand({
     id: "sybyl:upload-source",
@@ -564,7 +625,7 @@ ${formatInstruction}`;
       try {
         await addSourceToNote(plugin, context.view.file);
       } catch (error) {
-        new Notice(`Sybyl error: ${error instanceof Error ? error.message : String(error)}`);
+        new Notice(`Chorus error: ${error instanceof Error ? error.message : String(error)}`);
       }
     }
   });
@@ -576,6 +637,8 @@ ${formatInstruction}`;
       await manageSources(plugin);
     }
   });
+
+  // ── Lonelog commands ──────────────────────────────────────────────────────
 
   plugin.addCommand({
     id: "sybyl:lonelog-parse-context",
@@ -617,6 +680,231 @@ ${formatInstruction}`;
       }
       const sessionNumber = context.fm.session_number ?? 1;
       const block = `## Session ${sessionNumber}\n*Date: ${values.date} | Duration: ${values.duration || "-"}*\n\n${values.recap ? `**Recap:** ${values.recap}\n\n` : ""}`;
+      plugin.insertText(context.view, block, "cursor");
+      await writeFrontMatterKey(plugin.app, context.view.file, "session_number", sessionNumber + 1);
+    }
+  });
+
+  // ── Partylog commands ─────────────────────────────────────────────────────
+
+  plugin.addCommand({
+    id: "chorus:partylog-new-scene",
+    name: "Chorus: New Scene",
+    callback: async () => {
+      const context = await plugin.getActiveNoteContext();
+      if (!context?.view.file) return;
+      if (!isPartylogActive(plugin.settings, context.fm)) {
+        new Notice("Partylog mode is not enabled for this note.");
+        return;
+      }
+      const values = await openInputModal(plugin.app, "New Scene", [
+        { key: "sceneDesc", label: "Scene description", placeholder: "The burning mill at the edge of town" },
+        { key: "threadId", label: "Thread ID", optional: true, placeholder: "T2 — leave blank for standard scene" }
+      ]);
+      if (!values?.sceneDesc) return;
+
+      const counter = context.fm.scene_counter ?? 1;
+      const threadId = values.threadId?.trim();
+      const sceneId = threadId ? `${threadId}-S${counter}` : `S${counter}`;
+      const opts = partylogOpts(plugin.settings);
+
+      await runGeneration(
+        plugin,
+        `START SCENE. Generate only: 2-3 lines of third-person past-tense prose describing the atmosphere and setting of: "${values.sceneDesc}". No dialogue. No PC actions. No additional commentary.`,
+        (text, _fm, insideCodeBlock) =>
+          formatPartylogStartScene(text, sceneId, values.sceneDesc, partylogOpts(plugin.settings, insideCodeBlock))
+      );
+      if (plugin.settings.partylogAutoIncScene) {
+        await writeFrontMatterKey(plugin.app, context.view.file, "scene_counter", counter + 1);
+      }
+    }
+  });
+
+  plugin.addCommand({
+    id: "chorus:partylog-declare-action",
+    name: "Chorus: Declare Action",
+    callback: async () => {
+      const context = await plugin.getActiveNoteContext();
+      if (!context?.view.file) return;
+      if (!isPartylogActive(plugin.settings, context.fm)) {
+        new Notice("Partylog mode is not enabled for this note.");
+        return;
+      }
+      const values = await openInputModal(plugin.app, "Declare Action", [
+        { key: "character", label: "Character" },
+        { key: "action", label: "Action" },
+        { key: "roll", label: "Roll result" },
+        { key: "collaborator", label: "Collaborator", optional: true, placeholder: "Name — for @(A > B) pattern" }
+      ]);
+      if (!values?.character || !values.action || !values.roll) return;
+
+      const party = context.fm.party ?? [];
+      if (party.length && !party.some((m) => m.name === values.character)) {
+        new Notice(`Character '${values.character}' not found in party roster. Check frontmatter.`);
+        return;
+      }
+
+      const collaborator = values.collaborator?.trim();
+      const userMessage = `Character: ${values.character}\nAction: ${values.action}\nRoll result: ${values.roll}\nDescribe only the consequences and world reaction.\nDo not describe the character's action or internal state.`;
+
+      await runGeneration(
+        plugin,
+        userMessage,
+        (text, _fm, insideCodeBlock) => {
+          const opts = partylogOpts(plugin.settings, insideCodeBlock);
+          return collaborator
+            ? formatCollaborativeAction(values.character, collaborator, values.action, values.roll, text, opts)
+            : formatPartylogDeclareAction(values.character, values.action, values.roll, text, opts);
+        }
+      );
+    }
+  });
+
+  plugin.addCommand({
+    id: "chorus:partylog-gm-event",
+    name: "Chorus: Log GM Event",
+    callback: async () => {
+      const context = await plugin.getActiveNoteContext();
+      if (!context?.view.file) return;
+      if (!isPartylogActive(plugin.settings, context.fm)) {
+        new Notice("Partylog mode is not enabled for this note.");
+        return;
+      }
+      const values = await openInputModal(plugin.app, "Log GM Event", [
+        { key: "event", label: "Event" },
+        { key: "consequence", label: "Generate consequence?", optional: true, value: "yes", placeholder: "Clear to skip" }
+      ]);
+      if (!values?.event) return;
+
+      const generateConsequence = Boolean(values.consequence?.trim());
+
+      if (!generateConsequence) {
+        plugin.insertText(context.view, `! ${values.event}`);
+        return;
+      }
+
+      await runGeneration(
+        plugin,
+        `GM event: ${values.event}\nDescribe 1-2 consequences or reactions from the world or NPCs.\nThird person, neutral, present tense for world state.\nDo not describe any PC's reaction or decision.`,
+        (text, _fm, insideCodeBlock) =>
+          formatGMEvent(values.event, text, partylogOpts(plugin.settings, insideCodeBlock))
+      );
+    }
+  });
+
+  plugin.addCommand({
+    id: "chorus:partylog-log-this",
+    name: "Chorus: Log This",
+    callback: async () => {
+      const context = await plugin.getActiveNoteContext();
+      if (!context?.view.file) return;
+      if (!isPartylogActive(plugin.settings, context.fm)) {
+        new Notice("Partylog mode is not enabled for this note.");
+        return;
+      }
+      const party = context.fm.party;
+      if (!party?.length) {
+        new Notice("No party roster found. Add a party: field to this note's frontmatter.");
+        return;
+      }
+
+      const roster = party.map((m) => `- ${m.name}: ${m.notes}`).join("\n");
+
+      const selected = getSelection(context.view.editor);
+      let rawNotes: string;
+      let fromSelection: boolean;
+
+      if (selected) {
+        rawNotes = selected;
+        fromSelection = true;
+      } else {
+        const values = await openInputModal(plugin.app, "Log This — Raw Session Notes", [
+          { key: "notes", label: "Raw notes", textarea: true, placeholder: "Paste or type your raw session notes here…" }
+        ]);
+        if (!values?.notes?.trim()) return;
+        rawNotes = values.notes;
+        fromSelection = false;
+      }
+
+      if (rawNotes.length > 4000) {
+        new Notice("Raw notes too long for a single request. Split into smaller blocks.");
+        return;
+      }
+
+      const userMessage = `Convert these raw session notes into valid Partylog notation.
+
+PARTY ROSTER (use these exact names for @(Name) attribution):
+${roster}
+
+RAW NOTES:
+${rawNotes}
+
+Rules:
+- Use @(Name) for each player action, attributed to the correct character
+- Use ! for GM-introduced events
+- Use d: for dice rolls with their results
+- Use -> for resolution outcomes
+- Use => for consequences (one per line)
+- Preserve the sequence of events exactly
+- Do not invent events not present in the raw notes
+- Do not add [N:], [L:], or other tracking tags — the scribe will add those
+- Output only the Partylog notation lines, nothing else`;
+
+      const insideCodeBlock = isInsideCodeBlock(context.view.editor);
+      const opts = partylogOpts(plugin.settings, insideCodeBlock);
+
+      try {
+        const response = await plugin.requestGeneration(context.fm, context.noteBody, userMessage, 800);
+        const formatted = formatLogThis(response.text, opts);
+        if (fromSelection) {
+          insertBelowSelection(context.view.editor, formatted);
+        } else {
+          plugin.insertText(context.view, formatted);
+        }
+        plugin.maybeInsertTokenComment(context.view, response);
+      } catch (error) {
+        new Notice(`Chorus error: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
+  });
+
+  plugin.addCommand({
+    id: "chorus:partylog-parse-context",
+    name: "Chorus: Update Scene Context from Log",
+    callback: async () => {
+      const context = await plugin.getActiveNoteContext();
+      if (!context?.view.file) return;
+      if (!isPartylogActive(plugin.settings, context.fm)) {
+        new Notice("Partylog mode is not enabled for this note.");
+        return;
+      }
+      const parsed = parsePartylogContext(context.noteBody, plugin.settings.partylogContextDepth);
+      await writeFrontMatterKey(plugin.app, context.view.file, "scene_context", serializePartylogContext(parsed));
+      new Notice("Scene context updated from party log.");
+    }
+  });
+
+  plugin.addCommand({
+    id: "chorus:partylog-session-break",
+    name: "Chorus: New Session Header",
+    callback: async () => {
+      const context = await plugin.getActiveNoteContext();
+      if (!context?.view.file) return;
+      if (!isPartylogActive(plugin.settings, context.fm)) {
+        new Notice("Partylog mode is not enabled for this note.");
+        return;
+      }
+      const values = await openInputModal(plugin.app, "New Session Header", [
+        { key: "date", label: "Date", value: todayIsoDate() },
+        { key: "duration", label: "Duration", placeholder: "3h" },
+        { key: "scribe", label: "Scribe", optional: true },
+        { key: "recap", label: "Recap", optional: true, placeholder: "One-line summary of last session" }
+      ]);
+      if (!values?.date) return;
+
+      const sessionNumber = context.fm.session_number ?? 1;
+      const scribeLine = values.scribe?.trim() ? ` | Scribe: ${values.scribe.trim()}` : "";
+      const block = `## Session ${sessionNumber}\n*Date: ${values.date} | Duration: ${values.duration || "-"}${scribeLine}*\n\n${values.recap ? `**Recap:** ${values.recap}\n\n` : ""}`;
       plugin.insertText(context.view, block, "cursor");
       await writeFrontMatterKey(plugin.app, context.view.file, "session_number", sessionNumber + 1);
     }

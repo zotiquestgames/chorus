@@ -5,7 +5,7 @@ import builtins from "builtin-modules";
 const prod = process.argv[2] === "production";
 
 esbuild.build({
-  banner: { js: "/* Sybyl Plugin */" },
+  banner: { js: "/* Chorus Plugin */" },
   entryPoints: ["src/main.ts"],
   bundle: true,
   external: ["obsidian", "electron", ...builtins],

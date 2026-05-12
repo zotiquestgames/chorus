@@ -1,10 +1,10 @@
 {
-  "id": "sybyl",
-  "name": "Sybyl",
-  "version": "0.12.0",
+  "id": "chorus",
+  "name": "Chorus",
+  "version": "0.1.0",
   "minAppVersion": "1.4.0",
-  "description": "Solo tabletop role-playing inside Obsidian, powered by multiple AI providers. The Sybyl speaks; you decide.",
-  "author": "OpenAI Codex",
+  "description": "Solo and group tabletop role-playing inside Obsidian, with Lonelog and Partylog notation support.",
+  "author": "Roberto Bisceglie",
   "authorUrl": "",
   "isDesktopOnly": false
 }

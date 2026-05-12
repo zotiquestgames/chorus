@@ -1,4 +1,4 @@
-import { ProviderID, SybylSettings } from "../types";
+import { ChorusSettings, ProviderID } from "../types";
 import { AIProvider } from "./base";
 import { AnthropicProvider } from "./anthropic";
 import { GeminiProvider } from "./gemini";
@@ -6,7 +6,7 @@ import { OllamaProvider } from "./ollama";
 import { OpenAIProvider } from "./openai";
 import { OpenRouterProvider } from "./openrouter";
 
-export function getProvider(settings: SybylSettings, overrideId?: ProviderID): AIProvider {
+export function getProvider(settings: ChorusSettings, overrideId?: ProviderID): AIProvider {
   const id = overrideId ?? settings.activeProvider;
   switch (id) {
     case "gemini":

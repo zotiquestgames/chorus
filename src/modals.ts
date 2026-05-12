@@ -23,16 +23,30 @@ export class InputModal extends Modal {
     this.titleEl.setText(this.title);
     this.contentEl.empty();
     for (const field of this.fields) {
-      new Setting(this.contentEl)
-        .setName(field.label)
-        .setDesc(field.optional ? "Optional" : "")
-        .addText((text) => {
-          text.setPlaceholder(field.placeholder ?? "");
-          text.setValue(this.values[field.key] ?? "");
-          text.onChange((value) => {
-            this.values[field.key] = value;
+      if (field.textarea) {
+        new Setting(this.contentEl)
+          .setName(field.label)
+          .setDesc(field.optional ? "Optional" : "")
+          .addTextArea((text) => {
+            text.setPlaceholder(field.placeholder ?? "");
+            text.setValue(this.values[field.key] ?? "");
+            text.inputEl.rows = 8;
+            text.onChange((value) => {
+              this.values[field.key] = value;
+            });
           });
-        });
+      } else {
+        new Setting(this.contentEl)
+          .setName(field.label)
+          .setDesc(field.optional ? "Optional" : "")
+          .addText((text) => {
+            text.setPlaceholder(field.placeholder ?? "");
+            text.setValue(this.values[field.key] ?? "");
+            text.onChange((value) => {
+              this.values[field.key] = value;
+            });
+          });
+      }
     }
     new Setting(this.contentEl).addButton((button) => {
       button.setButtonText("Confirm").setCta().onClick(() => {

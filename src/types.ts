@@ -28,7 +28,12 @@ export interface OpenRouterProviderConfig {
   defaultModel: string;
 }
 
-export interface SybylSettings {
+export interface PartyMember {
+  name: string;
+  notes: string;
+}
+
+export interface ChorusSettings {
   activeProvider: ProviderID;
   providers: {
     gemini: GeminiProviderConfig;
@@ -44,6 +49,11 @@ export interface SybylSettings {
   lonelogContextDepth: number;
   lonelogWrapCodeBlock: boolean;
   lonelogAutoIncScene: boolean;
+  partylogMode: boolean;
+  partylogContextDepth: number;
+  partylogWrapCodeBlock: boolean;
+  partylogAutoIncScene: boolean;
+  partylogInsertRaw: boolean;
 }
 
 export interface SourceRef {
@@ -58,7 +68,7 @@ export interface NoteFrontMatter {
   genre?: string;
   pcs?: string;
   tone?: string;
-  // Sybyl-specific fields
+  // Sybyl/Chorus fields
   system_prompt_override?: string;
   provider?: ProviderID;
   model?: string;
@@ -71,6 +81,10 @@ export interface NoteFrontMatter {
   lonelog?: boolean;
   scene_counter?: number;
   session_number?: number;
+  // Partylog additions
+  partylog?: boolean;
+  party?: PartyMember[];
+  gm_name?: string;
 }
 
 export interface ResolvedSource {
@@ -114,9 +128,10 @@ export interface ModalField {
   placeholder?: string;
   value?: string;
   optional?: boolean;
+  textarea?: boolean;
 }
 
 export interface IPluginFacade {
-  settings: SybylSettings;
+  settings: ChorusSettings;
   saveSettings(): Promise<void>;
 }

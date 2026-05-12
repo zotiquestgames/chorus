@@ -1,5 +1,6 @@
 import { parseLonelogContext, serializeContext } from "./lonelog/parser";
-import { GenerationRequest, NoteFrontMatter, SybylSettings } from "./types";
+import { parsePartylogContext, serializePartylogContext } from "./partylog/parser";
+import { ChorusSettings, GenerationRequest, NoteFrontMatter } from "./types";
 
 const LONELOG_SYSTEM_ADDENDUM = `
 LONELOG NOTATION MODE IS ACTIVE.
@@ -15,9 +16,37 @@ When generating consequences, oracle interpretations, or scene text:
 Generate only the symbol-prefixed content lines. The formatter handles wrapping.
 `.trim();
 
-function buildBasePrompt(fm: NoteFrontMatter): string {
+const PARTYLOG_SYSTEM_ADDENDUM = `
+PARTYLOG NOTATION MODE IS ACTIVE.
+
+When generating consequences, oracle interpretations, or scene text:
+- Player actions use @(Name) — always attribute to a named character
+- GM events use ! — declarative, present tense, no attribution
+- Consequences use => (one per line for multiple consequences)
+- Oracle answers (GM-less mode only) use ->
+- Do not use blockquote markers (">")
+- Do not add labels like "[Result]" or "[Scene]"
+- Do not invent or suggest Partylog tags ([N:], [L:], etc.) — the scribe manages those
+- For scene descriptions: plain prose only, 2-3 lines, no symbol prefix
+- Never narrate any PC's internal thoughts or decisions
+- Never use second person
+
+Generate only the symbol-prefixed content lines. The formatter handles wrapping.
+`.trim();
+
+function buildPartyBlock(fm: NoteFrontMatter): string {
+  if (!fm.party?.length) return "";
+  const members = fm.party.map((m) => `- ${m.name}: ${m.notes}`).join("\n");
+  return `The party consists of:\n${members}`;
+}
+
+function buildBasePrompt(fm: NoteFrontMatter, partylogMode = false): string {
   const ruleset = fm.ruleset ?? "the game";
-  const pcs = fm.pcs ? `Player character: ${fm.pcs}` : "";
+  const pcBlock = partylogMode
+    ? buildPartyBlock(fm)
+    : fm.pcs
+      ? `Player character: ${fm.pcs}`
+      : "";
   const genre = fm.genre ? `Genre: ${fm.genre}` : "";
   const tone = fm.tone ? `Tone: ${fm.tone}` : "";
   const language = fm.language
@@ -45,15 +74,26 @@ RESPONSE FORMAT:
 - No rhetorical questions
 - Be concise. Omit preamble, commentary, and closing remarks. Follow the length instruction in each request.
 
-${pcs}
+${pcBlock}
 ${genre}
 ${tone}
 ${language}`.trim();
 }
 
-export function buildSystemPrompt(fm: NoteFrontMatter, lonelogMode: boolean): string {
-  const base = fm.system_prompt_override?.trim() || buildBasePrompt(fm);
-  let prompt = lonelogMode ? `${base}\n\n${LONELOG_SYSTEM_ADDENDUM}` : base;
+export function buildSystemPrompt(
+  fm: NoteFrontMatter,
+  lonelogMode: boolean,
+  partylogMode: boolean
+): string {
+  const base = fm.system_prompt_override?.trim() || buildBasePrompt(fm, partylogMode);
+  let prompt: string;
+  if (partylogMode) {
+    prompt = `${base}\n\n${PARTYLOG_SYSTEM_ADDENDUM}`;
+  } else if (lonelogMode) {
+    prompt = `${base}\n\n${LONELOG_SYSTEM_ADDENDUM}`;
+  } else {
+    prompt = base;
+  }
   if (fm.game_context?.trim()) {
     prompt = `${prompt}\n\nGAME CONTEXT:\n${fm.game_context.trim()}`;
   }
@@ -63,26 +103,28 @@ export function buildSystemPrompt(fm: NoteFrontMatter, lonelogMode: boolean): st
 export function buildRequest(
   fm: NoteFrontMatter,
   userMessage: string,
-  settings: SybylSettings,
+  settings: ChorusSettings,
   maxOutputTokens = 512,
   noteBody?: string
 ): GenerationRequest {
   const lonelogActive = fm.lonelog ?? settings.lonelogMode;
+  const partylogActive = fm.partylog ?? settings.partylogMode;
 
   let contextBlock = "";
-  if (lonelogActive && noteBody) {
-    // In Lonelog mode the live note body is always the source of truth
+  if (fm.scene_context?.trim()) {
+    contextBlock = `SCENE CONTEXT:\n${fm.scene_context.trim()}`;
+  } else if (partylogActive && noteBody) {
+    const ctx = parsePartylogContext(noteBody, settings.partylogContextDepth ?? 60);
+    contextBlock = serializePartylogContext(ctx);
+  } else if (lonelogActive && noteBody) {
     const ctx = parseLonelogContext(noteBody, settings.lonelogContextDepth);
     contextBlock = serializeContext(ctx);
-  } else if (fm.scene_context?.trim()) {
-    // For non-Lonelog notes, use the manually maintained scene_context
-    contextBlock = `SCENE CONTEXT:\n${fm.scene_context.trim()}`;
   }
 
   const contextMessage = contextBlock ? `${contextBlock}\n\n${userMessage}` : userMessage;
 
   return {
-    systemPrompt: buildSystemPrompt(fm, lonelogActive),
+    systemPrompt: buildSystemPrompt(fm, lonelogActive, partylogActive),
     userMessage: contextMessage,
     temperature: fm.temperature ?? settings.defaultTemperature,
     maxOutputTokens,
