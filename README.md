@@ -1,7 +1,5 @@
 # Chorus
 
-![cover](/cover.png)
-
 [![GitHub tag (Latest by date)](https://img.shields.io/github/v/tag/zeruhur/chorus)](https://github.com/zeruhur/chorus/releases) ![GitHub all releases](https://img.shields.io/github/downloads/zeruhur/chorus/total)
 
 Chorus is an Obsidian plugin for solo and group tabletop role-playing, backed by multiple AI providers, with Lonelog and Partylog notation support.
